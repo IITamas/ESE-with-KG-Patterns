@@ -1,4 +1,5 @@
 .venv
 dataset
 output_folder
+output
 __pycache__

@@ -1,86 +1,160 @@
 import ast
 
-class PathProcessor:
-    def __init__(self, min_or_num=3, max_or_num=5):
-        self.min_or_num = min_or_num
-        self.max_or_num = max_or_num
-        
-    def get_variable_path(self, path, entities):
-        """Convert entity paths to query variable paths"""
-        variable_path = []
-        for entity1, edge, entity2 in path[:-1]:
-            if str(entity1) not in entities:
-                entities[str(entity1)] = "?e"+str(len(entities))
-            if str(entity2) not in entities:
-                entities[str(entity2)] = "?e"+str(len(entities))
-            variable_path.append((entities[str(entity1)], edge, entities[str(entity2)]))
-        if str(path[-1][0]) in entities:
-            return variable_path + [(entities[str(path[-1][0])], path[-1][1], path[-1][2])]
-        return variable_path + [(path[-1][0], path[-1][1],entities[str(path[-1][2])])]
 
-    def get_variable_paths(self, paths, start_entities):
-        """Convert all paths to use variables"""
-        entities = {str(start_entities):"?e"}
-        variable_paths = []
-        for path in paths:
-            variable_paths += [self.get_variable_path(path, entities)]
-        return variable_paths
+class PathProcessor:
+    def __init__(self, min_entities_for_values_clause=3, max_entities_in_path_node=5):
+        self.min_entities_for_values_clause = min_entities_for_values_clause
+        self.max_entities_in_path_node = max_entities_in_path_node
+
+    def get_variable_for_entity_group(self, entity_group_str, entity_to_variable_map):
+        if entity_group_str not in entity_to_variable_map:
+            entity_to_variable_map[entity_group_str] = "?e" + str(
+                len(entity_to_variable_map)
+            )
+        return entity_to_variable_map[entity_group_str]
+
+    def get_variable_path_representation(
+        self, path_segments, entity_to_variable_map, start_entities_str_repr
+    ):
+        variable_path = []
+        if start_entities_str_repr not in entity_to_variable_map:
+            entity_to_variable_map[start_entities_str_repr] = "?e"
+
+        for source_nodes, edge_uri, target_nodes in path_segments:
+            source_nodes_str = str(sorted(list(source_nodes)))
+            target_nodes_str = str(sorted(list(target_nodes)))
+
+            var_source = self.get_variable_for_entity_group(
+                source_nodes_str, entity_to_variable_map
+            )
+            var_target = self.get_variable_for_entity_group(
+                target_nodes_str, entity_to_variable_map
+            )
+            variable_path.append(
+                ((source_nodes, var_source), edge_uri, (target_nodes, var_target))
+            )
+        return variable_path
+
+    def get_all_variable_paths(self, all_paths, start_entities):
+        entity_to_variable_map = {}
+        start_entities_str_repr = str(sorted(list(start_entities)))
+        entity_to_variable_map[start_entities_str_repr] = "?e"
+
+        all_variable_paths_repr = []
+        for path_segments in all_paths:
+            all_variable_paths_repr.append(
+                self.get_variable_path_representation(
+                    path_segments, entity_to_variable_map, start_entities_str_repr
+                )
+            )
+        return all_variable_paths_repr, entity_to_variable_map
 
     def get_optimal_prefix_from_number(self, number):
-        """Generate compact prefix codes"""
-        res = chr(ord('a')+number%26)
+        res = chr(ord("a") + number % 26)
         number = number // 26
-        while(number!=0):
-            res = chr(ord('a')+number%26)+res
+        while number != 0:
+            res = chr(ord("a") + number % 26) + res
             number = number // 26
-        return res+":"
+        return res + ":"
 
-    def get_prefix(self, url):
-        """Extract the namespace prefix from a URL"""
-        return "/".join(url.split("/")[:-1])+ ("/"+url.split("/")[-1].split("#")[0]+"#" if "#" in url.split("/")[-1] else "") if "http" in url else ""
+    def get_uri_namespace_prefix(self, url):
+        if "http" not in str(url):
+            return ""
+        parts = str(url).split("/")
+        if len(parts) < 2:
+            return ""
 
-    def get_optimal_prefixes_from_path(self, paths):
-        """Generate optimal prefixes for all URLs in the paths"""
-        prefixes = {'':''}
-        for path in paths:
-            for entities1, edge, entities2 in path:
-                urls = []
-                if type(entities1) is not str:
-                    urls += entities1
-                if type(entities2) is not str:
-                    urls += entities2
-                urls += [edge]
-                for url in urls:
-                    prefix = self.get_prefix(url)
-                    if prefix not in prefixes:
-                        prefixes[prefix] = self.get_optimal_prefix_from_number(len(prefixes))
-        return prefixes
+        last_part = parts[-1]
+        if "#" in last_part:
+            return "/".join(parts[:-1]) + "/" + last_part.split("#")[0] + "#"
+        else:
+            if last_part:
+                return "/".join(parts[:-1]) + "/"
+            return str(url)
 
-    def get_prefixed_url(self, prefix, url):
-        """Format URL with prefix or as full URI when needed"""
-        no_special = True
-        try:
-            url.split("#")[-1].split("/")[-1].encode('latin1')
-        except UnicodeEncodeError:
-            no_special = False
-        if no_special and not any([c in url for c in ["(", "+", ")", ",", "'"]]):
-            return prefix+url.split("#")[-1].split("/")[-1]
-        return "<"+url+">"
+    def get_optimal_prefixes_for_all_paths(self, all_variable_paths):
+        defined_prefixes = {"": ""}
+        for var_path in all_variable_paths:
+            for (
+                (original_source_nodes, _),
+                edge_uri,
+                (original_target_nodes, _),
+            ) in var_path:
+                uris_to_prefix = [edge_uri]
+                uris_to_prefix.extend(original_source_nodes)
+                uris_to_prefix.extend(original_target_nodes)
 
-    def transform_path_with_prefixes(self, paths, prefixes):
-        """Apply prefixes to all paths"""
-        new_paths = []
-        for path in paths:
-            for entities1, edge, entities2 in path:
-                if type(entities1) is not str:
-                    e1 = [self.get_prefixed_url(prefixes[self.get_prefix(url)],url) for url in entities1]
-                    e1.sort()
-                else:
-                    e1 = entities1
-                if type(entities2) is not str:
-                    e2 = [self.get_prefixed_url(prefixes[self.get_prefix(url)],url) for url in entities2]
-                    e2.sort()
-                else:
-                    e2 = entities2
-                new_paths.append([(e1,self.get_prefixed_url(prefixes[self.get_prefix(edge)],edge), e2)])
-        return new_paths
+                for uri in uris_to_prefix:
+                    namespace = self.get_uri_namespace_prefix(uri)
+                    if namespace and namespace not in defined_prefixes:
+                        defined_prefixes[namespace] = (
+                            self.get_optimal_prefix_from_number(
+                                len(defined_prefixes) - 1
+                            )
+                        )
+        return defined_prefixes
+
+    # def get_prefixed_uri_or_variable(self, item, defined_prefixes):
+    #     if isinstance(item, str) and item.startswith("?"):
+    #         return item
+
+    #     uri = str(item)
+    #     namespace = self.get_uri_namespace_prefix(uri)
+    #     if namespace and namespace in defined_prefixes and defined_prefixes[namespace]:
+    #         local_name = uri.replace(namespace, "")
+    #         # Add check for ANY special characters that would cause SPARQL syntax issues
+    #         if (
+    #             local_name
+    #             and not local_name[0] in ".-0123456789"
+    #             and not any(
+    #                 c in local_name
+    #                 for c in [
+    #                     "(",
+    #                     "+",
+    #                     ")",
+    #                     ",",
+    #                     "'",
+    #                     " ",
+    #                     "/",
+    #                     "&",
+    #                     "=",
+    #                     "?",
+    #                     "#",
+    #                     "%",
+    #                     "$",
+    #                     "@",
+    #                 ]
+    #             )
+    #         ):
+    #             return defined_prefixes[namespace] + local_name
+    #     return "<" + uri + ">"
+
+    def get_prefixed_uri_or_variable(self, item, defined_prefixes):
+        if isinstance(item, str) and item.startswith("?"):
+            return item
+        # Use angle brackets for all URIs to avoid SPARQL syntax issues
+        return "<" + str(item) + ">"
+
+    def transform_variable_paths_with_prefixes(
+        self, all_variable_paths, defined_prefixes
+    ):
+        transformed_paths_for_query = []
+        for var_path in all_variable_paths:
+            current_transformed_path = []
+            for (
+                (original_source_nodes, var_source),
+                edge_uri,
+                (original_target_nodes, var_target),
+            ) in var_path:
+                prefixed_edge = self.get_prefixed_uri_or_variable(
+                    edge_uri, defined_prefixes
+                )
+                current_transformed_path.append(
+                    (
+                        (original_source_nodes, var_source),
+                        prefixed_edge,
+                        (original_target_nodes, var_target),
+                    )
+                )
+            transformed_paths_for_query.append(current_transformed_path)
+        return transformed_paths_for_query

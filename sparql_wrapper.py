@@ -1,5 +1,6 @@
 from SPARQLWrapper import SPARQLWrapper, JSON
 
+
 class SPARQLWrapperCache:
     def __init__(self, endpoint, default_graph, timeout=30):
         self.endpoint = endpoint
@@ -11,8 +12,7 @@ class SPARQLWrapperCache:
         sparql = SPARQLWrapper(self.endpoint)
         sparql.addDefaultGraph(self.default_graph)
         sparql.setTimeout(self.timeout)
-        sparql.addExtraURITag("timeout", str(self.timeout*1000))
-        sparql.setQuery(QUERY + "\nLIMIT "+str(limit)+"\nOFFSET "+str(offset))
+        sparql.setQuery(f"{QUERY}\nLIMIT {limit}\nOFFSET {offset}")
         sparql.setReturnFormat(JSON)
         return sparql.query().convert()
 
@@ -22,14 +22,21 @@ class SPARQLWrapperCache:
         results = []
         limit = 10000
         offset = 0
-        while len(results)%10000!=0 or len(results)==0:
+        while True:
             try:
-                result = self.run_query_with_limits(QUERY, limit, offset)
-            except:
-                raise Exception("Query execution failed")
-            results = results + result["results"]["bindings"]
+                result_page = self.run_query_with_limits(QUERY, limit, offset)
+            except Exception as e:
+                print(f"SPARQL query failed: {e}")
+                print(f"Query: {QUERY}")
+                return []
+
+            current_bindings = result_page["results"]["bindings"]
+            results.extend(current_bindings)
+
+            if len(current_bindings) < limit:
+                break
             offset += limit
-            if (len(result["results"]["bindings"])==0):
+            if not current_bindings and offset > 0:
                 break
         self.QUERY_RESULTS[QUERY] = results
         return results

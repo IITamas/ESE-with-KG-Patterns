@@ -121,7 +121,7 @@ python main.py --example
 python main.py --example --visualize --output output_folder
 
 # Run experiments on a database
-python main.py --database path/to/database.json --output output_folder --templates 1 2 301 302 --sample_size 5 --max_queries 5 --visualize
+python main.py --database path/to/database.json --output output_folder --templates 1 2 301 302 --max_queries 5 --visualize
 ```
 
 Command-line arguments:
@@ -129,7 +129,6 @@ Command-line arguments:
 - `--database`: Path to the database JSON file containing SPARQL queries
 - `--output`: Directory to save results and visualizations (default: output)
 - `--templates`: Template IDs to run experiments on (default: [1, 2, 301, 302])
-- `--sample_size`: Number of seed entities to use (default: 5)
 - `--max_queries`: Maximum number of queries per template (default: 5)
 - `--visualize`: Generate and save visualizations
 
